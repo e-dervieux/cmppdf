@@ -4,14 +4,18 @@
 # See https://creativecommons.org/licenses/by-sa/4.0/
 set -u -e
 
+RCSID='$Id: cmppdf,v 1.28 2026/11/22 00:59:22 jima Exp jima $'
+
 ##########################################################################
 USAGE=$(cat <<'EOF'
  NAME
     cmppdf -- Compare the visual appearance or text of PDF files
 
  SYNOPSIS
-    cmppdf        [-o BASEPATH] [-q] [-d] FILE1 FILE2
-    cmppdf --text [-o BASEPATH] [-q] [-d] FILE1 FILE2
+    cmppdf [-q] FILE1 FILE2                        # compare appearance
+    cmppdf [-q] --text FILE1 FILE2                 # compare text only
+    cmppdf [-q] --text -o - FILE1 FILE2 >diffs.txt # capture diffs
+    cmppdf [-q] -pw PASSWORD ... FILE1 FILE2       # handle passwords
 
  EXIT STATUS
    0  if no differences found
@@ -23,28 +27,31 @@ USAGE=$(cat <<'EOF'
 
    --diff diff-option1,diff-option2, ...
 
-     Specify options to pass to the 'diff' command, separated by commas.
-     The default is '-u'.  --text is implied by --diff.
+     Implies --text.  
+     Specify options to pass to the 'diff' command (default is '-u').
 
-   -o, --output BASEPATH
+   -o, --outprefix PATHPREFIX
 
-     With this option a "difference file" named BASEPATH_page_NNN.png
-     or .txt is created for each page which has differences.
+     With this option a "difference file" is created for each page which has 
+     differences.  The files will be named PREFIXpage_NNN.png (or with -t: .txt).
+     If PREFIX has a trailing '/' the named directory will be created if needed.
+     
      With visual comparison (the default), the files will be .png images with
      changed parts highlighted in RED.   With text comparison (--text option),
-     the files will contain output from the 'diff' command, or if BASEPATH
+     the files will contain output from the 'diff' command, or if PATHPREFIX
      is '-' then all diffs are written to stdout.
 
-   -q, --quiet     Suppress all progress messages
+   --pw common_password
+   --pw1 password_for_FILE1
+   --pw2 password_for_FILE2
+
+     For when a pdf requires a password to open; if not given, prompts.
+
+   -q, --quiet     Suppress progress messages
 
    -d, --debug     Show detailed information about commands run
 
  AUTHOR
-   The graphical compare code was originaly posted by 'linguisticturn' at
-     https://stackoverflow.com/questions/6469157/pdf-compare-on-linux-command-line
-     (License CC BY-SA 4.0)
-     Whoever you are, please send me more info so I can credit you properly!
-
    Jim Avera (jim.avera at gmail)
      Added command-line processing
      Added --text support
@@ -52,12 +59,17 @@ USAGE=$(cat <<'EOF'
      Reworked temp files to allow curr-dir to be read-only
       and allow FILE1 and FILE2 to be the same.
 
- The latest version of this script can be downloaded 
+   The graphical compare code was posted by 'linguisticturn' at
+     https://stackoverflow.com/questions/6469157/pdf-compare-on-linux-command-line
+     (License CC BY-SA 4.0)
+     Whoever you are, please contact me so I can credit you properly!
+
+ The latest version of this script can be downloaded
  from https://abhweb.org/jima/cmppdf?v
 
 EOF
+echo "$RCSID" | sed -n -e 's/.*,v \([0-9][0-9]*\.[.0-9]*\).*/ This is Version \1/p'
 )
-# $Id: cmppdf,v 1.24 2023/03/31 05:53:48 jima Exp jima $
 
 ##########################################################################
 # The basic idea:
@@ -77,15 +89,17 @@ diff_basepath=
 textonly=
 diff_opts=
 tmpdir=
+pw1=PROMPT
+pw2=PROMPT
 declare -a diff_opts=()
 
 TEMP=$(getopt -o 'ho:r:tqd' \
-        --long 'help,resolution:,textonly,diff-opts:,debug,tmpdir:,output:,quiet' \
+        --long 'help,resolution:,textonly,diff-opts:,debug,tmpdir:,output:,pw:,pw1:,pw2:,quiet' \
         -n "$progname" -- ${1+"$@"})
 [ $? -eq 0 ] || { echo "$progname -h for help" >&2; exit 2; }
 
 # Hack to try to work on MacOS which has BSD getopt
-case "$TEMP" in 
+case "$TEMP" in
   *--\ ho:r:tqd*)
     # We have BSD getopt, not GNU getopt. It processed the "-o"
     # as the 'optstring' and the rest as the input arguments.
@@ -113,19 +127,22 @@ esac
 while true ; do
   case "$1" in
     --)                                  shift; break ;;
-    -o|--output)     diff_basepath="$2"; shift; shift ;;
+    -o|--outprefix)  diff_basepath="$2"; shift; shift ;;
     -r|--resolution) resolution="$2";    shift; shift ;;
     -t|--textonly)   textonly=yes;              shift ;;
     --diff-opts)     IFS=',' command eval 'diff_opts+=($2)'; textonly=yes; shift; shift ;;
+    --pw)            pw1="$2"; pw2="$2"; shift; shift ;;
+    --pw1)           pw1="$2";           shift; shift ;;
+    --pw2)           pw2="$2";           shift; shift ;;
     -q|--quiet)      quiet=yes;                 shift ;;
     -d|--debug)      debug=yes;                 shift ;;
     --tmpdir)        tmpdir="$2";        shift; shift ;;
     -h|--help)       [ -t 1 ] || PAGER=cat; echo "$USAGE" | ${PAGER:-more} ; exit 0 ;;
-     *) echo "Internal error! (Unrecognized: $1)"; exit 99 ;;
+     *) echo "Internal error! (Unrecognized: $1)" >&2; exit 99 ;;
   esac
 done
 
-[ -z "$debug" ] || quiet=
+#[ -z "$debug" ] || quiet=
 if [ -n "$debug" ] ; then setdashx="set -x;" ; else setdashx=""; fi
 if [ ${#diff_opts[*]} -eq 0 ] ; then
   diff_opts=(-u)
@@ -138,6 +155,9 @@ if [ $# -ne 2 ] ; then
 fi
 file_1="$1"
 file_2="$2"
+
+shortcut_ok= 
+[ -n "$quiet" ] && [ -n "$textonly" ] && [ -z "$diff_basepath" ] && shortcut_ok=yes
 
 # Create a unique directory for temp files
 if [ -z "$tmpdir" ] ; then
@@ -156,31 +176,63 @@ if [ "$diff_basepath" = "-" ] ; then
     exit 2
   fi
 elif [ -n "$diff_basepath" ] ; then
-  diff_basepath=$(realpath "$diff_basepath")
+  case "$diff_basepath" in
+    */) [ -d "$diff_basepath" ] || mkdir -v "$diff_basepath" ;;
+    *)  [ ! -d "$diff_basepath" ] || diff_basepath="${diff_basepath}/" ;;
+  esac
+  # Remove any pre-existing output files
+  for f in "${diff_basepath}"page_[0-9][0-9]*.{txt,png} ; do
+    if [ -e "$f" ] ; then
+      [ -n "$quiet" ] || echo "Removing pre-existing output '$f'" >&2
+      rm "$f" || { echo "Could not remove existing $f" >&2; exit 2; }
+    fi
+  done
 fi
+
+# run_pdftk INFILE PW pdftkargs...
+#
+# First try without input_pw and if that fails then with it.  This is
+# necessary because input_pw A=PROMPT is specified then pdftk always prompts
+# even if the file is not encrypted.
+# INFILE will use "filehandle" 'A'.  stderr is always sent to /dev/null
+function run_pdftk {
+  local inpath="$1" ; shift
+  local pw="$1" ; shift
+  [ -r "$inpath" ] || { echo "$inpath : UNREADABLE" >&2; exit 2; }
+  ( eval $setdashx ;
+    pdftk A="$inpath" "$@" dont_ask 2>/dev/null \
+      || pdftk A="$inpath" input_pw "A=$pw" "$@" dont_ask 2>/dev/null
+  )
+}
+
 
 # Change the current directory to $tmpdir and run commands from there.
 # This avoids trouble if the user's current directory is not writable.
 # Also pdftk always creates a "doc_data.txt" in the current dir and so
 # this is the only way to avoid trying to write into the user's directory.
 [ -z "$debug" ] || echo "cd $tmpdir" >&2
-cd "$tmpdir"
+cd "$tmpdir" || { echo "PROBLEM WITH TDIR '${tmpdir}'" >&2; exit 2; }
+
+if [ -n "$shortcut_ok" ] ; then
+  # Don't burst; compare text of whole files
+  run_pdftk "$path_1" "$pw1" output f1.pdf
+  run_pdftk "$path_2" "$pw2" output f2.pdf
+  (eval $setdashx; pdftotext f1.pdf f1.txt)
+  (eval $setdashx; pdftotext f2.pdf - | cmp --quiet f1.txt -)
+  exit $?
+fi
+
 
 # Burst the files into individual pages
-(eval $setdashx;
- # First try without a password, and if that fails, ask user for a pw
- pdftk A="$path_1" burst output f1-page_%03d.pdf 2>/dev/null \
-   || pdftk A="$path_1" input_pw A=PROMPT burst output f1-page_%03d.pdf
- pdftk A="$path_2" burst output f2-page_%03d.pdf 2>/dev/null \
-   || pdftk A="$path_2" input_pw A=PROMPT burst output f2-page_%03d.pdf
-) || exit $?
+run_pdftk "$path_1" "$pw1" burst output f1-page_%03d.pdf
+run_pdftk "$path_2" "$pw2" burst output f2-page_%03d.pdf
 
 status=0
 
 # we loop over the individual pages of the first file
 for f1 in `echo f1-page_*.pdf`
 do
-  # 'page' holds the current page number, e.g. 'page_003'
+  # Set $page to e.g. 'page_003'
   page="${f1/f1-/}"
   page="${page/.pdf/}"
 
@@ -188,9 +240,9 @@ do
   f2="${f1/f1/f2}"
 
   if [ ! -r "$f2" ] ; then
-    [ -z "$quiet" ] && echo "$page is NOT PRESENT in the second file ($file_2)" >& 2;
     status=1
-    #exit $status 
+    if [ -n "$shortcut_ok" ] ; then exit $status ; fi
+    echo "$page is NOT PRESENT in the second file ($file_2)" >& 2;
     continue
   fi
 
@@ -216,37 +268,38 @@ do
   fi
 
   # Create the checksums for the two files
-  B2S_1=$(eval $setdashx; b2sum "$g1" | awk '{print $1}')
-  B2S_2=$(eval $setdashx; b2sum "$g2" | awk '{print $1}')
+  B2S_1=$((eval $setdashx; b2sum "$g1") | awk '{print $1}')
+  B2S_2=$((eval $setdashx; b2sum "$g2") | awk '{print $1}')
 
   # Now we compare the checksums
   if [ "$B2S_1" = "$B2S_2" ]; then
-    [ -n "$quiet" ] || echo "$page: same";
+    [ -n "$quiet" ] || echo "$page: same" >&2;
   else
     status=1
+    if [ -n "$shortcut_ok" ] ; then exit $status ; fi
     # The checksums are different.
-    # Create a difference file (if requested)
+    # Create a difference file for each page (if requested)
     if [ -n "$diff_basepath" ] ; then
       if [ "$diff_basepath" = "-" ] ; then
         # only with --text
         (eval $setdashx; diff "${diff_opts[@]}" "$g1" "$g2") || true
       else
         if [ -n "$textonly" ] ; then
-          outfile="${diff_basepath}_${page}.txt"
+          outfile="${diff_basepath}${page}.txt"
           (eval $setdashx; diff "${diff_opts[@]}" "$g1" "$g2" > "$outfile") || true
         else
-          outfile="${diff_basepath}_${page}.png"
+          outfile="${diff_basepath}${page}.png"
           (eval $setdashx; compare "$g1" "$g2" "$outfile") || true
         fi
         if [ -r "$outfile" ] ; then
-          [ -n "$quiet" ] || echo "Created '$outfile'"
+          [ -n "$quiet" ] || echo "Created '$outfile'" >&2
         else
-          echo "Error creating '$outfile'" # e.g. non-writable directory
+          echo "Error creating '$outfile'" >&2 # e.g. non-writable directory?
           exit 2
         fi
       fi
     else
-      [ -n "$quiet" ] || echo "$page: different";
+      [ -n "$quiet" ] || echo "$page: different" >&2;
     fi
   fi
 done
@@ -261,7 +314,7 @@ do
   if [ ! -r "$f1" ] ; then
     [ -z "$quiet" ] && echo "$page is NOT PRESENT in the first file ($file_1)" >& 2;
     status=1
-    #exit $status 
+    #exit $status
     continue
   fi
 done
