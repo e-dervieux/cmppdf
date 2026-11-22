@@ -13,6 +13,7 @@ cmppdf --text -o - FILE1 FILE2 >diffs.txt # capture diffs
 cmppdf -pw COMMON_PASSWORD ... FILE1 FILE2 # handle passwords
 cmppdf -pw1 PASS1 -pw2 PASS2 ... FILE1 FILE2
 
+cmppdf --help  # full documentation
 ```
 
 ## Dependencies
