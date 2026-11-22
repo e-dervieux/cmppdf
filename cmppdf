@@ -33,8 +33,8 @@ USAGE=$(cat <<'EOF'
    -o, --outprefix PATHPREFIX
 
      With this option a "difference file" is created for each page which has 
-     differences.  The files will named PREFIXpage_NNN.png (or with -t: .txt).
-     If PREFIX has a trailing / the named directory will be created if needed.
+     differences.  The files will be named PREFIXpage_NNN.png (or with -t: .txt).
+     If PREFIX has a trailing '/' the named directory will be created if needed.
      
      With visual comparison (the default), the files will be .png images with
      changed parts highlighted in RED.   With text comparison (--text option),
