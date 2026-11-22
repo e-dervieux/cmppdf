@@ -1,9 +1,18 @@
 # cmppdf
 
-This is a small bash script to visually compare two PDF files. It can be used with
+This is a bash script to visually or textually compare two PDF files. 
+It can be used with
 
 ```
-cmppdf path/to/file1.pdf path/to/file2.pdf
+cmppdf FILE1 FILE2                        # compare appearance
+cmppdf --text FILE1 FILE2                 # compare text
+
+cmppdf -o OUTPREFIX FILE1 FILE2           # save difference jpegs
+cmppdf --text -o - FILE1 FILE2 >diffs.txt # capture diffs
+
+cmppdf -pw COMMON_PASSWORD ... FILE1 FILE2 # handle passwords
+cmppdf -pw1 PASS1 -pw2 PASS2 ... FILE1 FILE2
+
 ```
 
 ## Dependencies
@@ -23,4 +32,4 @@ This script requires:
 
 ## Authorship and License
 
-This software is distributed under the [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) license (Attribution-ShareAlike 4.0 International). The graphical compare code was originally posted by `linguisticturn` on [StackOverflow](https://stackoverflow.com/a/71011009/11241626) (License CC BY-SA 4.0) and later improved by Jim Avera [in the same thread](https://stackoverflow.com/a/75703176/11241626), who posted it [on his personal website](https://abhweb.org/jima/cmppdf). I (Emmanuel Dervieux) only posted it on GitHub for the sake of continuation, bug tracking, and possible further improvements if need be.
+This software is distributed under the [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) license (Attribution-ShareAlike 4.0 International). The graphical compare code was originally posted by `linguisticturn` on [StackOverflow](https://stackoverflow.com/a/71011009/11241626) (License CC BY-SA 4.0) and later improved by Jim Avera [in the same thread](https://stackoverflow.com/a/75703176/11241626), who keeps his latest version [on his personal website](https://abhweb.org/jima/cmppdf). I (Emmanuel Dervieux) only posted it on GitHub for the sake of continuation, bug tracking, and possible further improvements if need be.
